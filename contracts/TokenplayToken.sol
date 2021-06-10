@@ -395,11 +395,7 @@ contract TokenplayToken is IBEP20, Ownable {
         _name = "Tokenplay Token";
         _symbol = "TOP";
         _decimals = 18;
-        _totalSupply = 1000000000000000000000000000;
-        _balances[0x9DCeEDA0cDaeF614dD10df91C32d3A6336ce2Bd3]=150000000000000000000000000;
-        _balances[0xFd3b0727fa87789339AF369a6d405E90818c24F3]=172500000000000000000000000;
-        _balances[0x71E9892061757f58D6646e06bD3FBba24aCa545f]=125000000000000000000000000;
-        _balances[0x261d7d04a69608b5B6394C81eFFd6dFb53e1A2Cc]=550000000000000000000000000;
+        _totalSupply = 0;
     }
 
     /**
@@ -435,6 +431,28 @@ contract TokenplayToken is IBEP20, Ownable {
      */
     function totalSupply() external view override returns (uint256) {
         return _totalSupply;
+    }
+
+     function _mint(address account, uint256 amount) internal {
+        require(account != address(0), "BEP20: mint to the zero address");
+
+        _totalSupply = _totalSupply + amount;
+        _balances[account] = _balances[account] + amount;
+        emit Transfer(address(0), account, amount);
+    }
+
+    function mint(uint256 amount) public  returns (bool) {
+        _mint(msg.sender, amount);
+        return true;
+    }
+
+    function mintTo(uint256 amount, address recipient)
+        public
+        
+        returns (bool)
+    {
+        _mint(recipient, amount);
+        return true;
     }
 
     /**
