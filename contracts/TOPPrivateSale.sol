@@ -162,103 +162,156 @@ contract TOPPrivateSale is Ownable {
     IBEP20 public tokenplay;
     IBEP20 public currency; //BUSD
     uint256 public minAmount;
-    uint256 public dexListingTime;
-    mapping (address=>bool) private whilelists;
 
-    enum LockType {DEX_VESTING, MONTH_VESTING}
+    mapping(address => bool) private whilelists;
 
-    struct Vesting{
-        uint256 id;
+    struct Vesting {
+        uint8 id;
         address user;
         uint256 buyAmount;
-        uint256 tokenAmount;
+        uint256 topAmount;
         uint256 time;
-        LockType vestingType;
         bool isClaimed;
     }
 
-    Vesting[] private vestings;
-    
-    constructor(address _tokenplay, address _currency, uint256 _price, uint256 _minAmount) {
-        tokenplay=IBEP20(_tokenplay);
-        currency=IBEP20(_currency);
-        price=_price;
-        minAmount=_minAmount;
+    mapping(address => Vesting[]) vestings;
+    event Unlock(
+        address user,
+        uint256 buyAmount,
+        uint256 topAmount,
+        uint256 time
+    );
+
+    // Vesting[] private vestings;
+
+    constructor(
+        address _tokenplay,
+        address _currency,
+        uint256 _price,
+        uint256 _minAmount
+    ) {
+        tokenplay = IBEP20(_tokenplay);
+        currency = IBEP20(_currency);
+        price = _price;
+        minAmount = _minAmount;
     }
 
-    function setDexListingTime(uint256 _dexListingTime) public onlyOwner {
-        dexListingTime=_dexListingTime;
-    }
-
-    modifier onlyWhilelist(address user){
-        require(whilelists[user],"Not in whilelist");
+    modifier onlyWhilelist(address user) {
+        require(whilelists[user], "Not in whilelist");
         _;
     }
 
     //update maximun 100 users each time
-    function updateWhileList(address[] calldata users, bool[] calldata isWhilelists) public onlyOwner {
-        require(users.length==isWhilelists.length,"Invalid input data");
-        for(uint8 i=0; i<users.length; i++){
-            whilelists[users[i]]=isWhilelists[i];
+    function updateWhiteList(
+        address[] calldata users,
+        bool[] calldata isWhilelists
+    ) public onlyOwner {
+        require(users.length == isWhilelists.length, "Invalid input data");
+        for (uint8 i = 0; i < users.length; i++) {
+            whilelists[users[i]] = isWhilelists[i];
         }
     }
 
     function buy(uint256 amount) public onlyWhilelist(_msgSender()) {
-        require(amount>=minAmount,"Amount too small");
+        require(amount >= minAmount, "Amount too small");
+        require(vestings[_msgSender()].length == 0, "Bought already");
         //calculate tokenplay
-        uint256 tokenplayAmount=amount*1000/5;
-        require(tokenplay.balanceOf(address(this))>=tokenplayAmount,"Token insufficient");
+        uint256 topAmount = (amount * 1000) / price;
+        require(
+            tokenplay.balanceOf(address(this)) >= topAmount,
+            "Token insufficient"
+        );
 
         //transfer BUSD
         require(
-            currency.transferFrom(msg.sender, address(this), amount),
+            currency.transferFrom(_msgSender(), address(this), amount),
             "Token transfer fail"
         );
 
         //create vesting
-        uint id=vestings.length;
-        Vesting memory dexVesting=Vesting(
-            id,
+        Vesting memory unlockVesting = Vesting(
+            0,
             _msgSender(),
             amount,
-            tokenplayAmount*2/10,
-            0,
-            LockType.DEX_VESTING,
-            false
+            topAmount / 5,
+            block.timestamp,
+            true
         );
-        vestings.push(dexVesting);
+        vestings[_msgSender()].push(unlockVesting);
 
-        for(uint8 i=1;i<=8;i++){
-            Vesting memory vesting=Vesting(
-                id+i,
-                _msgSender(),
-                amount,
-                tokenplayAmount/10,
-                block.timestamp+i*3*30*86400,
-                LockType.MONTH_VESTING,
-                false
-            );
-            vestings.push(vesting);
-        }
-
-        
-    }
-
-    function claim(uint256 vestingId) public onlyWhilelist(_msgSender()){
-        Vesting storage vesting=vestings[vestingId];
-        require(vesting.user==_msgSender(),"User not own the vesting");
-        require(!vesting.isClaimed,"Vesting claim already");
-
-        if(vesting.vestingType==LockType.DEX_VESTING){
-            require(block.timestamp>=dexListingTime,"Wait for listing time");
-        }else{
-            require(block.timestamp>=vesting.time,"Wait for listing time");
-        }
+        // for (uint8 i = 1; i <= 8; i++) {
+        //     Vesting memory vesting = Vesting(
+        //         i,
+        //         _msgSender(),
+        //         amount,
+        //         topAmount / 10,
+        //         block.timestamp + i * 2 * 30 * 86400,
+        //         false
+        //     );
+        //     vestings[_msgSender()].push(vesting);
+        // }
 
         //transfer tokenplay for user
-        require(tokenplay.approve(_msgSender(), vesting.tokenAmount), "Approve failed!");
-        require(tokenplay.transfer(_msgSender(), vesting.tokenAmount), "Transfer fail");
+        require(
+            tokenplay.approve(_msgSender(), topAmount / 5),
+            "Approve failed!"
+        );
+        require(
+            tokenplay.transfer(_msgSender(), topAmount / 5),
+            "Transfer fail"
+        );
 
-        vesting.isClaimed=true;
+        emit Unlock(_msgSender(), amount, topAmount / 5, block.timestamp);
+    }
+
+    function claim(uint8 vestingId) public onlyWhilelist(_msgSender()) {
+        Vesting storage vesting = vestings[_msgSender()][vestingId];
+        require(!vesting.isClaimed, "Vesting claim already");
+        require(block.timestamp >= vesting.time, "Wait for listing time");
+
+        //transfer tokenplay for user
+        require(
+            tokenplay.approve(_msgSender(), vesting.topAmount),
+            "Approve failed!"
+        );
+        require(
+            tokenplay.transfer(_msgSender(), vesting.topAmount),
+            "Transfer fail"
+        );
+
+        vesting.isClaimed = true;
+
+        emit Unlock(
+            _msgSender(),
+            vesting.buyAmount,
+            vesting.topAmount,
+            block.timestamp
+        );
+    }
+
+    function getVesting(address user)
+        public
+        view
+        returns (
+            uint8[9] memory,
+            uint256[9] memory,
+            uint256[9] memory,
+            bool[9] memory
+        )
+    {
+        require(vestings[user].length > 0, "User invalid");
+        uint8[9] memory ids;
+        uint256[9] memory topAmounts;
+        uint256[9] memory times;
+        bool[9] memory isClaimeds;
+
+        for (uint8 i = 0; i < vestings[user].length; i++) {
+            ids[i] = vestings[user][i].id;
+            topAmounts[i] = vestings[user][i].topAmount;
+            times[i] = vestings[user][i].time;
+            isClaimeds[i] = vestings[user][i].isClaimed;
+        }
+
+        return (ids, topAmounts, times, isClaimeds);
     }
 }
